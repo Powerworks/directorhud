@@ -1,0 +1,26 @@
+{
+  "name": "directorhud",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "DirectorHUD — autonomous broadcast director for Twitch (TwitchCon Hackathon 2026)",
+  "license": "UNLICENSED",
+  "engines": {
+    "node": ">=22.18"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json",
+    "test": "node --test test/*.test.ts",
+    "test:watch": "node --test --watch test/",
+    "demo": "node src/demo/simulate.ts",
+    "start": "node src/index.ts"
+  },
+  "dependencies": {
+    "tmi.js": "^1.8.5"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "@types/tmi.js": "^1.8.6",
+    "typescript": "^5.9.3"
+  }
+}
