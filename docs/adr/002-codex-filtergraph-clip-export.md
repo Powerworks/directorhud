@@ -17,10 +17,12 @@ duration — using `ffmpeg -ss <offset> -t <duration>`. No separate
 Twitch-side video ingest, no VOD download, no extra process.
 
 **Filtergraph generation:** on each spike, `CodexFiltergraphClient` shells
-out to `codex exec` (non-interactive, `--json` + `--output-last-message`)
+out to `codex exec` (non-interactive, `--json --skip-git-repo-check`)
 with the spike's headline/caption text and target geometry (1080×1920,
 TikTok-ready), asking for an FFmpeg `-vf` filtergraph string that
-crops/scales to vertical and burns the caption via `drawtext`. The Codex
+crops/scales to vertical and burns the caption via `drawtext`. The client
+parses the emitted JSONL event stream itself (the CLI doesn't offer a
+`--output-last-message` flag in 0.149.1) to capture the session ID. The Codex
 CLI session ID from the JSONL event stream is captured into
 `clip-manifest.jsonl` — the exact artifact the hackathon's Stage-One
 check and scoring need.
