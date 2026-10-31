@@ -16,11 +16,13 @@
     "start": "node src/index.ts"
   },
   "dependencies": {
-    "tmi.js": "^1.8.5"
+    "tmi.js": "^1.8.5",
+    "ws": "^8.22.0"
   },
   "devDependencies": {
     "@types/node": "^22.10.0",
     "@types/tmi.js": "^1.8.6",
+    "@types/ws": "^8.18.2",
     "typescript": "^5.9.3"
   }
 }

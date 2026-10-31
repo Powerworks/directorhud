@@ -14,10 +14,18 @@ export interface TwitchConfig {
   readonly botName: string;
 }
 
+export interface OpenAIConfig {
+  /** null ⇒ teaser fallback only — safe for keynote demos. */
+  readonly apiKey: string | null;
+  readonly model: string;
+}
+
 export interface RuntimeConfig {
   readonly provider: ProviderKind;
   readonly twitch: TwitchConfig | null;
   readonly detector: DetectorConfig;
+  readonly openai: OpenAIConfig;
+  readonly hudPort: number;
 }
 
 function loadDotEnv(): void {
@@ -73,5 +81,11 @@ export function loadConfig(argvProvider: string | undefined = undefined): Runtim
       }
     : null;
 
-  return { provider, twitch, detector };
+  const openai: OpenAIConfig = {
+    apiKey: process.env.OPENAI_API_KEY ?? null,
+    model: process.env.OPENAI_MODEL ?? "gpt-4o-mini",
+  };
+  const hudPort = Math.max(1024, Math.min(65535, numEnv("DIRECTORHUD_HUD_PORT", 8788)));
+
+  return { provider, twitch, detector, openai, hudPort };
 }

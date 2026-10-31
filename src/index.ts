@@ -1,13 +1,17 @@
 /**
- * DirectorHUD — Phase 1 entry point.
- * Wires provider -> spike detector, logs every SpikeDetected as JSON.
- * Ctrl-C (SIGINT) stops gracefully.
+ * DirectorHUD — Phase 2 entry point.
+ * Wires provider ─► spike detector ─► headline service ─► HUD overlay.
+ * Ctrl-C stops gracefully.
  */
+import { createServer } from "node:http";
 import { loadConfig } from "./config.ts";
-import { SpikeDetector } from "./detector/SpikeDetector.ts";
+import { HeadlineService, OpenAIHeadlineClient } from "./headline/headline.ts";
+import { createPipeline } from "./pipeline.ts";
 import { MockChatProvider } from "./ingest/MockChatProvider.ts";
 import { TwitchIrcProvider } from "./ingest/TwitchIrcProvider.ts";
 import type { ChatProvider } from "./ingest/ChatProvider.ts";
+import { attachHud } from "./hud/server.ts";
+import type { SpikeDetected } from "./domain/events.ts";
 
 function providerFromArgv(): string | undefined {
   const flag = process.argv.indexOf("--provider");
@@ -18,13 +22,47 @@ function providerFromArgv(): string | undefined {
 async function main(): Promise<void> {
   const config = loadConfig(providerFromArgv());
 
-  const detector = new SpikeDetector(config.detector, (event) => {
-    // Context is a 60s array of messages — collapse it for terminal
-    // readability; consumers downstream receive the full structure.
+  // Phase 2 headline path: live API when a key exists, teaser always ready.
+  const headline = new HeadlineService(
+    config.openai.apiKey === null
+      ? null
+      : new OpenAIHeadlineClient(config.openai.apiKey, config.openai.model),
+  );
+
+  // HUD overlay server (OBS Browser Source → http://localhost:<port>/)
+  const httpServer = createServer();
+  const hud = attachHud(httpServer);
+  const hudPort = config.hudPort;
+  await new Promise<void>((resolve, reject) => {
+    httpServer.once("error", reject);
+    httpServer.listen(hudPort, () => {
+      httpServer.off("error", reject);
+      void resolve();
+    });
+  });
+  process.stdout.write(
+    `[hud] overlay → http://localhost:${hudPort}/  (add as OBS Browser Source, 1920×1080)\n`,
+  );
+
+  // Diagnostics sink.
+  const logSpike = (event: SpikeDetected) => {
     const { context, ...summary } = event;
     process.stdout.write(
       `[SPIKE] ${JSON.stringify(summary)} context:[${context.map((m) => m.id).join(",")}]\n`,
     );
+  };
+
+  const pipeline = createPipeline({
+    // The 120s demo script embeds its burst at 40s — matching the short-
+    // calibration scenario (as in simulate.ts) so both triggers can fire
+    // inside the script window. Live detectors keep config.detector's defaults.
+    config:
+      config.provider === "mock"
+        ? { ...config.detector, warmupWindows: 4 }
+        : config.detector,
+    headline,
+    hud,
+    onSpike: logSpike,
   });
 
   let provider: ChatProvider;
@@ -48,23 +86,18 @@ async function main(): Promise<void> {
     });
   }
 
-  provider.register((msg) => detector.processMessage(msg));
+  provider.register((msg) => pipeline.onChat(msg));
   await provider.start();
 
-  // If the trailing window never gets a next-window message to close it,
-  // finalize honest partial-MPS stats before we evaluate back-pressure.
-  const now = () => Date.now();
-  const interval = setInterval(() => detector.forceCloseCurrent(now()), 1_000);
+  // Keep the trailing window honest between idle gaps.
+  const interval = setInterval(() => pipeline.flush(), 1_000);
   interval.unref();
 
   const shutdown = async (): Promise<void> => {
     clearInterval(interval);
+    pipeline.flush();
     await provider.stop().catch(() => undefined);
-    detector.forceCloseCurrent(now());
-    const snap = detector.snapshot();
-    process.stdout.write(
-      `[DONE] provider=${provider.name} armed=${snap.armed} windows=${snap.windowsIncorporated} mps=${snap.mps.toFixed(2)}\n`,
-    );
+    process.stdout.write(`[DONE] ${pipeline.stats()} listeners=${pipeline.listeners()}\n`);
     process.exit(0);
   };
 
@@ -72,7 +105,6 @@ async function main(): Promise<void> {
   process.once("SIGTERM", () => void shutdown());
 
   if (provider instanceof MockChatProvider) {
-    // Mock finishes on its own — settle and leave cleanly.
     await new Promise<void>((resolve) => {
       const timer = setInterval(() => {
         if (provider.stopRequested) {

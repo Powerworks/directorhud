@@ -1,0 +1,199 @@
+<!doctype html>
+<!--
+  DirectorHUD overlay — point OBS Browser Source at http://localhost:8788/
+  WS /events feeds every live spike; the page degrades to a canned DEMO loop
+  when unreachable. DOM writes are textContent-only: chat text never becomes
+  markup, so a hostile chat can't inject scripts into the broadcast canvas.
+-->
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=1920, height=1080" />
+<title>DirectorHUD</title>
+<style>
+  :root {
+    --bg: #070a12;
+    --ink: #f2f5fa;
+    --muted: #8b94a3;
+    --acc: #f15a3d;    /* broadcast red */
+    --acc2: #9146ff;   /* twitch purple */
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { width: 1920px; height: 1080px; overflow: hidden; }
+  body {
+    background:
+      radial-gradient(1200px 500px at 50% -10%, rgba(149, 70, 255, 0.10), transparent 60%),
+      var(--bg);
+    color: var(--ink);
+    font-family: "Arial Black", "Helvetica Neue", Arial, sans-serif;
+    -webkit-user-select: none;
+  }
+
+  /* ---------- ticker band ---------- */
+  #band {
+    position: absolute;
+    left: 0; right: 0; top: 470px;
+    display: flex; align-items: center; justify-content: center;
+    height: 148px;
+    padding: 0 90px;
+    background: rgba(255, 255, 255, 0.035);
+    border-top: 2px solid rgba(149, 70, 255, 0.45);
+    border-bottom: 2px solid rgba(149, 70, 255, 0.45);
+  }
+  #tick {
+    position: absolute;
+    white-space: nowrap;
+    font-size: clamped(44px, 4.2vw, 64px);
+    letter-spacing: 0.5px;
+    color: var(--ink);
+    opacity: 0;
+    transform: translateY(26px) scale(0.96);
+    transition: opacity 0.28s ease, transform 0.28s ease;
+  }
+  #tick.up {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+
+  /* reason pill */
+  #pill {
+    position: absolute;
+    left: 46px; top: 50%;
+    transform: translateY(-50%);
+    display: inline-block;
+    padding: 8px 18px;
+    border-radius: 999px;
+    font-family: Arial, sans-serif;
+    font-size: 22px;
+    font-weight: 700;
+    letter-spacing: 1px;
+    background: var(--acc);
+    color: #fff;
+    opacity: 0;
+    transition: opacity 0.25s;
+  }
+  #pill.show { opacity: 1; }
+  #pill.storm { background: var(--acc2); }
+
+  /* stat strip */
+  #stats {
+    position: absolute;
+    right: 46px; top: 50%;
+    transform: translateY(-50%);
+    font-family: "Helvetica Neue", Arial, sans-serif;
+    font-size: 26px;
+    letter-spacing: 1px;
+    color: var(--muted);
+    display: flex; gap: 34px;
+  }
+  #stats b { color: var(--ink); font-weight: 700; }
+
+  /* watermark + source honesty tag */
+  #demo {
+    position: absolute;
+    right: 30px; top: 26px;
+    font-family: Arial, sans-serif;
+    font-size: 18px;
+    font-weight: 700;
+    letter-spacing: 2px;
+    padding: 6px 12px;
+    border: 1px solid var(--acc);
+    border-radius: 4px;
+    color: var(--acc);
+  }
+  #boot {
+    position: absolute;
+    left: 46px; top: 26px;
+    font-family: Arial, sans-serif;
+    font-size: 18px;
+    letter-spacing: 2px;
+    color: var(--muted);
+  }
+</style>
+</head>
+<body>
+  <div id="boot">DIRECTORHUD — ARMED</div>
+  <div id="demo" hidden>LOCAL DEMO</div>
+  <div id="band">
+    <span id="pill">SPIKE</span>
+    <span id="tick">listening…</span>
+    <span id="stats">
+      <span>mps <b id="s-mps">–</b></span>
+      <span>baseline <b id="s-base">–</b></span>
+      <span>ratio <b id="s-ratio">–</b></span>
+      <span>src <b id="s-src">–</b></span>
+    </span>
+  </div>
+
+<script>
+(() => {
+  "use strict";
+
+  const tick = document.getElementById("tick");
+  const pill = document.getElementById("pill");
+  const demo = document.getElementById("demo");
+  const els = {
+    mps:  document.getElementById("s-mps"),
+    base: document.getElementById("s-base"),
+    ratio:document.getElementById("s-ratio"),
+    src:  document.getElementById("s-src"),
+  };
+
+  // Small local buffer so refocus/overlay reloads don't blank the HUD.
+  let replay = { headline: "listening…", mps: "–", baselineMPS: "–", triggerRatio: "–", source: "" };
+  const put = (el, v) => { el.textContent = v; };
+
+  function render(e) {
+    put(tick, e.headline);
+    tick.classList.add("up");
+    pill.textContent = e.reason === "emote_density" ? "EMOTE STORM" : "VELOCITY";
+    pill.classList.toggle("storm", e.reason === "emote_density");
+    pill.classList.add("show");
+    put(els.mps,  e.mps.toFixed(1));
+    put(els.base, e.baselineMPS.toFixed(1));
+    put(els.ratio, e.triggerRatio.toFixed(2));
+    put(els.src, e.source);
+    replay = {
+      headline: e.headline, mps: e.mps.toFixed(1), baselineMPS: e.baselineMPS.toFixed(1),
+      triggerRatio: e.triggerRatio.toFixed(2), source: e.source, reason: e.reason,
+    };
+    // Auto-hide the pill a beat before the next spike.
+    clearTimeout(render._hide);
+    render._hide = setTimeout(() => pill.classList.remove("show"), 4500);
+  }
+
+  // Restore last state if the overlay reconnects late.
+  tick.textContent = replay.headline;
+  if (els.src.textContent) { put(els.mps, replay.mps); put(els.base, replay.baselineMPS);
+    put(els.ratio, replay.triggerRatio); put(els.src, replay.source); }
+  tick.classList.toggle("up", replay.headline !== "listening…");
+
+  const proto = location.protocol === "https:" ? "wss" : "ws";
+  const ws = new WebSocket(`${proto}://${location.host}/events`);
+
+  ws.onopen = () => demo.hidden = true;
+  ws.onerror = () => {
+    // Honest fallback loop for local dev without a server; clearly tagged
+    // "LOCAL DEMO" in the corner. Never runs on a live stream setup.
+    demo.hidden = false;
+    const canned = [
+      'Chat ignites — "keKW" storm ×9 (42 messages in 10s)',
+      'Chat erupts — everyone spamming the same emote at once',
+      'Hype train leaves the station 3 minutes early',
+    ];
+    let i = 0;
+    setInterval(() => render({
+      headline: canned[i % canned.length],
+      reason: i % 3 === 1 ? "emote_density" : "velocity",
+      mps: 30 + (i % 5), baselineMPS: 4.2, triggerRatio: 7.5, source: "demo",
+    }), 9000);
+    i += 1;
+    ws.close();
+  };
+  ws.onmessage = (ev) => {
+    try { render(JSON.parse(ev.data)); } catch { /* ignore junk frames */ }
+  };
+})();
+</script>
+</body>
+</html>
