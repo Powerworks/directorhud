@@ -9,6 +9,7 @@ import type { DetectorConfig, SpikeDetector } from "./detector/SpikeDetector.ts"
 import { SpikeDetector as SpikeDetectorImpl } from "./detector/SpikeDetector.ts";
 import type { HeadlineService, SynthesisContext } from "./headline/headline.ts";
 import type { HudBroadcaster, HudEvent } from "./hud/server.ts";
+import type { ClipGenerator } from "./clip/ClipGenerator.ts";
 
 export interface Pipeline {
   /** Engine — exposed read-only for stats; drive it via onChat. */
@@ -30,8 +31,19 @@ export function createPipeline(params: {
   onSpike?: (event: SpikeDetected) => void;
   readonly headline: HeadlineService;
   readonly hud: HudBroadcaster | null;
+  /** Phase 3 — null when no recording source is configured (clips are decoration, not required). */
+  readonly clip?: ClipGenerator | null;
 }): Pipeline {
-  const { config = {}, onSpike, headline, hud } = params;
+  const { config = {}, onSpike, headline, hud, clip = null } = params;
+
+  const fireClip = (event: SpikeDetected, caption: string) => {
+    if (!clip) return;
+    // Fire-and-forget — same rule as the headline/HUD path: clip export can
+    // take seconds (ffmpeg + a Codex round trip) and must never stall ingest.
+    clip.generate(event, caption).catch((error) => {
+      process.stderr.write(`[pipeline] clip generation failed: ${String(error)}\n`);
+    });
+  };
 
   const detector = new SpikeDetectorImpl(config, (event: SpikeDetected) => {
     // Diagnostics first — always.
@@ -44,19 +56,17 @@ export function createPipeline(params: {
 
     void headline
       .synthesize(event.context, meta)
-      .then((synth) =>
-        hud?.broadcast(toHudEvent(event, synth)),
-      )
+      .then((synth) => {
+        hud?.broadcast(toHudEvent(event, synth));
+        fireClip(event, synth.headline);
+      })
       .catch((error) => {
         // synthesize() is contractually non-rejecting, but an exception
         // here means a bug, not a network problem — still never break the stream.
         process.stderr.write(`[pipeline] headline sink failed: ${String(error)}\n`);
-        hud?.broadcast(
-          toHudEvent(event, {
-            headline: "Moment locked — highlight rendering",
-            source: "teaser",
-          }),
-        );
+        const fallback = { headline: "Moment locked — highlight rendering", source: "teaser" as const };
+        hud?.broadcast(toHudEvent(event, fallback));
+        fireClip(event, fallback.headline);
       });
   });
 

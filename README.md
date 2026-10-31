@@ -44,6 +44,8 @@ Obsidian vault (`Scoopy/`).
 | Language             | TypeScript 5.9 (strict, erasable-only)  | Same discipline as the production playbooks.               |
 | Twitch ingest        | `tmi.js` (IRC) behind `ChatProvider`    | EventSub webhook needs a public URL; IRC is loopback-ready. |
 | Mock ingest          | Seeded synthetic stream (`mulberry32`)  | Deterministic replay for tests and demos.                  |
+| Headline (Phase 2)   | OpenAI chat completions (fetch)         | Cheapest model by default; teaser fallback always works.  |
+| HUD (Phase 2)        | Single-file overlay + `ws` WebSocket f/s  | One Asset, one terminal page, zero build step.           |
 | Tests                | `node:test` + `assert/strict`           | Built in — no Vitest/Jest dependency.                      |
 | CI smoke gate        | `npm run demo`                          | Seeded 120s stream must fire exactly 2 spikes or exit ≠0.   |
 | Build                | `tsc` → `dist/`                         | Optional; the sources run natively.                        |
@@ -54,14 +56,21 @@ Obsidian vault (`Scoopy/`).
 git clone <repo> directorhud && cd directorhud
 npm install
 
-npm test           # 30 acceptance tests, ~1s, fully deterministic
+npm test           # 64 acceptance tests, ~3s, fully deterministic
 npm run demo       # headless 120s simulation → smoke gate (exit 0 = PASS)
 npm run build      # tsc → dist/ (optional)
-npm start -- --provider mock        # CLI harness, mock stream
-# Live Twitch:
-cp .env.example .env   # fill TWITCH_CHANNEL + TWITCH_OAUTH
-npm start              # provider=twitch implied once creds exist
+npm start          # provider=auto (mock unless Twitch creds in .env)
+
+# OBS Browser Source (HUD overlay): http://localhost:8788/ — 1920×1080,
+# local file caching OFF. The overlay shows a labeled LOCAL DEMO loop when
+# disconnected — never stream with the server down.
 ```
+
+Node 22.18+ required (type-stripping is on-by-default there).
+`.env` keys: `TWITCH_CHANNEL`, `TWITCH_OAUTH`, `TWITCH_BOT_NAME`, `OPENAI_API_KEY`,
+`OPENAI_MODEL` (default `gpt-4o-mini`), `DIRECTORHUD_HUD_PORT` (8788),
+detector tunables (`DIRECTORHUD_WINDOW_MS`, `_WARMUP_WINDOWS`, `_EWMA_ALPHA`,
+`_VELOCITY_K`, `_EMOTE_DENSITY_MIN`, `_CONTEXT_MS`).
 
 Node 22.18+ required (type-stripping is on-by-default there).
 
@@ -69,12 +78,29 @@ Node 22.18+ required (type-stripping is on-by-default there).
 
 | Phase | Milestone                        | Status        |
 | ----- | -------------------------------- | ------------- |
-| 1     | Spike detection & Twitch ingest  | ✅ done       |
-| 2     | Codex headline + HUD frontend    | 🔜 WebSocket + pages/ can host it statically |
-| 3     | FFmpeg generation & pipeline     | queued        |
-| 4     | E2E in OBS, polish               | queued        |
-| 5     | Demo video & repo packaging      | queued        |
-| 6     | Submission (Nov 2, 2PM PT)       | queued        |
+| 1     | Spike detection & Twitch ingest  | ✅ committed `b878795` |
+| 2     | Codex headline + HUD frontend    | ✅ done — API path + teaser fallback + overlay |
+| 3     | FFmpeg generation & pipeline     | ✅ done — Codex-generated filtergraph + deterministic fallback, opt-in via `DIRECTORHUD_RECORDING_PATH` (see `docs/adr/002`) |
+| 4     | E2E in OBS, polish               | 🔜 due Sun EOD |
+| 5     | Demo video & repo packaging      | 🔜 due Mon EOD |
+| 6     | Submission (Nov 2, 2PM PT)       | 🔜 due Mon morning |
+
+## Phase 2 pipeline (now live)
+
+`provider → SpikeDetector → SpikeDetected → HeadlineService → ws → overlay`
+
+- **Headline** — OpenAI chat completions over the 60s context (model selectable,
+  cheapest-class default). **Every** failure or short payload degrades to a
+  deterministic teaser so a live demo cannot hang on the API. Sanitization
+  strips C0/DEL control chars before anything reaches the HUD; the overlay
+  writes DOM via `textContent` only — hostile chat text can never become markup.
+- **HUD** — 1920×1080 dark overlay, ticker band, reason pill (VELOCITY /
+  EMOTE STORM), mps/baseline/ratio strip, 4.5s pill auto-hide. Protocol:
+  `WS /events` JSON frame per spike.
+
+Submission-relevant notes locked at the top of this README: Devpost link, the
+Codex CLI free tier for Sunday's evidence session, and that demos must show
+real Twitch (the mock is dev-only).
 
 ## Detector contract (acceptance criteria)
 

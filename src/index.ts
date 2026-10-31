@@ -4,6 +4,7 @@
  * Ctrl-C stops gracefully.
  */
 import { createServer } from "node:http";
+import { mkdir } from "node:fs/promises";
 import { loadConfig } from "./config.ts";
 import { HeadlineService, OpenAIHeadlineClient } from "./headline/headline.ts";
 import { createPipeline } from "./pipeline.ts";
@@ -12,6 +13,8 @@ import { TwitchIrcProvider } from "./ingest/TwitchIrcProvider.ts";
 import type { ChatProvider } from "./ingest/ChatProvider.ts";
 import { attachHud } from "./hud/server.ts";
 import type { SpikeDetected } from "./domain/events.ts";
+import { ClipGenerator } from "./clip/ClipGenerator.ts";
+import { CodexFiltergraphClient } from "./clip/filtergraph.ts";
 
 function providerFromArgv(): string | undefined {
   const flag = process.argv.indexOf("--provider");
@@ -52,6 +55,19 @@ async function main(): Promise<void> {
     );
   };
 
+  // Phase 3 clip path: only active when a recording source is configured
+  // (DIRECTORHUD_RECORDING_PATH) — see docs/adr/002. Codex generates the
+  // filtergraph; a deterministic center-crop is the always-available fallback.
+  let clip: ClipGenerator | null = null;
+  if (config.clip) {
+    await mkdir(config.clip.outputDir, { recursive: true });
+    clip = new ClipGenerator(
+      { ...config.clip, geometry: { width: 1080, height: 1920 } },
+      new CodexFiltergraphClient(),
+    );
+    process.stdout.write(`[clip] enabled → ${config.clip.outputDir}/ (recording: ${config.clip.recordingPath})\n`);
+  }
+
   const pipeline = createPipeline({
     // The 120s demo script embeds its burst at 40s — matching the short-
     // calibration scenario (as in simulate.ts) so both triggers can fire
@@ -62,6 +78,7 @@ async function main(): Promise<void> {
         : config.detector,
     headline,
     hud,
+    clip,
     onSpike: logSpike,
   });
 

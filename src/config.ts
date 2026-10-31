@@ -20,12 +20,27 @@ export interface OpenAIConfig {
   readonly model: string;
 }
 
+export interface ClipSettings {
+  /** OBS's continuously-recording local file — see docs/adr/002. */
+  readonly recordingPath: string;
+  /** Recording start time (epoch ms) — must share a clock with the detector. */
+  readonly recordingStartedAt: number;
+  readonly outputDir: string;
+  readonly manifestPath: string;
+  readonly preRollMs: number;
+  readonly postRollMs: number;
+  readonly sourceWidth: number;
+  readonly sourceHeight: number;
+}
+
 export interface RuntimeConfig {
   readonly provider: ProviderKind;
   readonly twitch: TwitchConfig | null;
   readonly detector: DetectorConfig;
   readonly openai: OpenAIConfig;
   readonly hudPort: number;
+  /** null ⇒ clip export disabled — safe default, no recording source assumed. */
+  readonly clip: ClipSettings | null;
 }
 
 function loadDotEnv(): void {
@@ -87,5 +102,19 @@ export function loadConfig(argvProvider: string | undefined = undefined): Runtim
   };
   const hudPort = Math.max(1024, Math.min(65535, numEnv("DIRECTORHUD_HUD_PORT", 8788)));
 
-  return { provider, twitch, detector, openai, hudPort };
+  const recordingPath = process.env.DIRECTORHUD_RECORDING_PATH;
+  const clip: ClipSettings | null = recordingPath
+    ? {
+        recordingPath,
+        recordingStartedAt: numEnv("DIRECTORHUD_RECORDING_STARTED_AT", Date.now()),
+        outputDir: process.env.DIRECTORHUD_CLIP_OUTPUT_DIR ?? "./clips",
+        manifestPath: process.env.DIRECTORHUD_CLIP_MANIFEST ?? "./clips/clip-manifest.jsonl",
+        preRollMs: Math.max(0, numEnv("DIRECTORHUD_CLIP_PREROLL_MS", 15_000)),
+        postRollMs: Math.max(0, numEnv("DIRECTORHUD_CLIP_POSTROLL_MS", 10_000)),
+        sourceWidth: Math.max(1, Math.round(numEnv("DIRECTORHUD_CLIP_SOURCE_WIDTH", 1920))),
+        sourceHeight: Math.max(1, Math.round(numEnv("DIRECTORHUD_CLIP_SOURCE_HEIGHT", 1080))),
+      }
+    : null;
+
+  return { provider, twitch, detector, openai, hudPort, clip };
 }
