@@ -82,7 +82,7 @@ export class CodexFiltergraphClient implements FiltergraphClient {
   readonly binary: string;
   readonly spawnFn: SpawnFn;
 
-  constructor(timeoutMs = 20_000, binary = "codex", spawnFn: SpawnFn = nodeSpawn) {
+  constructor(timeoutMs = 45_000, binary = "codex", spawnFn: SpawnFn = nodeSpawn) {
     this.timeoutMs = timeoutMs;
     this.binary = binary;
     this.spawnFn = spawnFn;
