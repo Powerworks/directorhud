@@ -54,5 +54,20 @@ YouTube, no copyrighted music, < 3 minutes total.
 - [ ] Upload to YouTube (unlisted or public).
 - [ ] Copy Codex session IDs from `clip-manifest.jsonl` into the Devpost entry.
 - [ ] Write the "how we used Codex" paragraph (Stage One requirement).
-- [ ] Submit at https://twitchcon-codex.devpost.com/ — saved ≠ submitted,
-      no edits after the deadline.
+## Ops notes — actual submission-day run (2026-11-02)
+
+- This machine has no sudo; OBS runs via flatpak (com.obsproject.Studio 33),
+  launched `flatpak run --command=obs com.obsproject.Studio`.
+- Laptop CPU = Core i7-5600U (2C/4T): streaming at 720p30, two x264 encoders
+  (stream veryfast 4 Mbps CBR, recording ultrafast 2.5 Mbps fragmented mp4)
+  plus transient clip exports — keep overlay sources to GPU-safe nodes only.
+- `go-live.sh` (~/directorhud/bin/) drives the whole bring-up: OBS, obs-
+  websocket bootstrap (scene, BR/DirectorHUD browser src on :8788, both
+  outputs), then `node src/index.ts` in twitch mode. Pauses on missing
+  TWITCH_STREAM_KEY / TWITCH_OAUTH.
+- ffmpeg has no libx264: clip export probes at runtime (openh264/mpeg4
+  fallback, see f86a09c) — verified end-to-end in a full mock run this
+  morning: 3 spikes → 3 Codex filtergraphs → 2 clean clips, 1 truncated
+  only because the toy recording ended (expected; live file just grows).
+- If the live attempt fails, stage B = headless mock demo (same clip
+  machinery, mock chat) — brief it honestly as a "repeatability" cut.
