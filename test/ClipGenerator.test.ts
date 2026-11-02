@@ -10,7 +10,7 @@ import type { ChildProcess } from "node:child_process";
 import { mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { ClipGenerator, DEFAULT_CLIP_CONFIG, type ClipConfig } from "../src/clip/ClipGenerator.ts";
+import { ClipGenerator, DEFAULT_CLIP_CONFIG, pickVideoCodec, type ClipConfig } from "../src/clip/ClipGenerator.ts";
 import type { SpawnFn } from "../src/clip/filtergraph.ts";
 import type { SpikeDetected } from "../src/domain/events.ts";
 
@@ -70,7 +70,7 @@ describe("ClipGenerator", () => {
 
     const manifestLines = readFileSync(config.manifestPath, "utf8").trim().split("\n");
     assert.equal(manifestLines.length, 1);
-    const entry = JSON.parse(manifestLines[0]) as { outputPath: string; windowIndex: number };
+    const entry = JSON.parse(manifestLines[0] ?? "") as { outputPath: string; windowIndex: number };
     assert.equal(entry.windowIndex, 3);
     assert.equal(entry.outputPath, result.outputPath);
   });
@@ -111,5 +111,35 @@ describe("ClipGenerator", () => {
 
     assert.equal(result.filtergraphSource, "codex");
     assert.equal(result.codexSessionId, "sid-42");
+  });
+});
+
+/** Mimics `ffmpeg -encoders` over the injected SpawnFn — real ffmpeg is never spawned. */
+function encodersListing(lines: string[]): SpawnFn {
+  return (_bin: string, _args: string[]) => {
+    const child = new EventEmitter() as EventEmitter & { stdout: EventEmitter };
+    child.stdout = new EventEmitter();
+    queueMicrotask(() => {
+      child.stdout.emit("data", Buffer.from(["Encoders:\n", ...lines].join("\n")));
+      child.emit("close", 0);
+    });
+    return child as unknown as ChildProcess;
+  };
+}
+
+const X264_LINE = " V....D libx264                libx264 H.264 / AVC / MPEG-4 AVC / MPEG-4 part 10";
+const OPENH264_LINE = " V....D libopenh264           OpenH264 H.264 / AVC / MPEG-4 part 10 (codec h264)";
+
+describe("pickVideoCodec (Fedora ffmpeg has no libx264 — verified 2026-10-31)", () => {
+  test("prefers libx264 when present", async () => {
+    assert.equal(await pickVideoCodec(encodersListing(["Encoders:\n", X264_LINE, OPENH264_LINE])), "libx264");
+  });
+
+  test("falls through to libopenh264 when libx264 is absent", async () => {
+    assert.equal(await pickVideoCodec(encodersListing([OPENH264_LINE])), "libopenh264");
+  });
+
+  test("returns mpeg4 when even openh264 is missing", async () => {
+    assert.equal(await pickVideoCodec(encodersListing([" V.... mpeg4                   MPEG-4 part 2"])), "mpeg4");
   });
 });

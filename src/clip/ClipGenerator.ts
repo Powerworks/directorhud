@@ -59,6 +59,43 @@ function runFfmpeg(spawnFn: SpawnFn, args: string[]): Promise<void> {
   });
 }
 
+/**
+ * Video codec, probed per clip. Fedora-minimal ffmpeg builds ship no
+ * `libx264` (verified 2026-10-31), but OpenH264 emits standards-compliant
+ * h264 into .mp4 at zero extra dependencies — good enough for a TikTok
+ * upload target. Last resort `mpeg4` keeps the clip playable everywhere.
+ * Attempted in order; the first that exists on this machine's build wins.
+ */
+export async function pickVideoCodec(spawnFn: SpawnFn): Promise<string> {
+  let stdout: string;
+  try {
+    stdout = await ffmpegEncoders(spawnFn);
+  } catch (err) {
+    // Can't enumerate this build (missing binary, sandbox, whatever) —
+    // keep the pre-probe behavior and assume libx264; the encode call
+    // will still surface the real error if it's absent.
+    process.stderr.write(`[clip] encoder probe failed (${String(err)}), assuming libx264\n`);
+    return "libx264";
+  }
+  // `ffmpeg -encoders` rows are fixed-width: "<sp><VID>A....D<sp><name>".
+  for (const codec of ["libx264", "libopenh264", "mpeg4"]) {
+    if (new RegExp(`^ .{7}${codec}\\s`, "m").test(stdout)) return codec;
+  }
+  return "mpeg4";
+}
+
+function ffmpegEncoders(spawnFn: SpawnFn): Promise<string> {
+  return new Promise<string>((resolve, reject) => {
+    const child = spawnFn("ffmpeg", ["-hide_banner", "-encoders"], {
+      stdio: ["ignore", "pipe", "ignore"],
+    });
+    let out = "";
+    child.stdout?.on("data", (d: Buffer) => (out += d.toString("utf8")));
+    child.on("error", reject);
+    child.on("close", (code) => (code === 0 ? resolve(out) : reject(new Error(`ffmpeg -encoders exited ${code}`))));
+  });
+}
+
 export class ClipGenerator {
   readonly config: ClipConfig;
   readonly filtergraphClient: FiltergraphClient | null;
@@ -90,6 +127,7 @@ export class ClipGenerator {
     );
 
     const outputPath = `${c.outputDir}/spike-${spike.windowIndex}-${spike.firedAt}.mp4`;
+    const videoCodec = await pickVideoCodec(this.spawnFn);
     await runFfmpeg(this.spawnFn, [
       "-y",
       "-ss",
@@ -101,7 +139,7 @@ export class ClipGenerator {
       "-vf",
       filtergraph,
       "-c:v",
-      "libx264",
+      videoCodec,
       "-preset",
       "veryfast",
       "-c:a",
